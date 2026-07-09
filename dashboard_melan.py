@@ -589,10 +589,29 @@ if df_raw.empty:
     st.stop()
 
 
-df_ranked = hitung_saw(df_raw)
-top_10 = df_ranked.head(10).copy()
-bottom_10 = df_ranked.sort_values("nilai_saw", ascending=True).head(10).copy()
-df_filtered = pd.concat([top_10, bottom_10], ignore_index=True).drop_duplicates(subset=["id_import"])
+ddf_ranked = hitung_saw(df_raw)
+
+df_ranked_valid = ddf_ranked[
+    ~ddf_ranked["nama_mitra_tampil"]
+    .astype(str)
+    .str.lower()
+    .str.contains("nama mitra tidak diketahui|none|nan|null", na=False)
+].copy()
+
+top_10 = df_ranked_valid.head(10).copy()
+
+bottom_10 = (
+    df_ranked_valid
+    .sort_values("nilai_saw", ascending=True)
+    .head(10)
+    .copy()
+)
+
+df_filtered = (
+    pd.concat([top_10, bottom_10], ignore_index=True)
+    .drop_duplicates(subset=["id_import"])
+)
+
 df_display = df_filtered.sort_values("nilai_saw", ascending=False).reset_index(drop=True)
 
 
