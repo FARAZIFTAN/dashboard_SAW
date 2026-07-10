@@ -504,7 +504,7 @@ def hitung_saw(df):
         min_c4 / df["accrued_interest"].replace(0, np.nan)
     ).replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    bobot_c1, bobot_c2, bobot_c3, bobot_c4 = 0.40, 0.30, 0.20, 0.10
+    bobot_c1, bobot_c2, bobot_c3, bobot_c4 = 0.35, 0.30, 0.20, 0.15
 
     df["nilai_saw"] = (
         (df["c1_normalisasi"] * bobot_c1)
@@ -641,10 +641,10 @@ st.sidebar.markdown(
     <div class="sidebar-card">
         <div class="sidebar-card-title">Bobot SAW</div>
         <div class="sidebar-weight-list">
-            <div class="sidebar-weight-item"><div class="sidebar-weight-name">C1 Jumlah Realisasi</div><div class="sidebar-weight-value">0.40</div></div>
+            <div class="sidebar-weight-item"><div class="sidebar-weight-name">C1 Jumlah Realisasi</div><div class="sidebar-weight-value">0.35</div></div>
             <div class="sidebar-weight-item"><div class="sidebar-weight-name">C2 Outstanding</div><div class="sidebar-weight-value">0.30</div></div>
             <div class="sidebar-weight-item"><div class="sidebar-weight-name">C3 Kolektabilitas</div><div class="sidebar-weight-value">0.20</div></div>
-            <div class="sidebar-weight-item"><div class="sidebar-weight-name">C4 Accrued Interest</div><div class="sidebar-weight-value">0.10</div></div>
+            <div class="sidebar-weight-item"><div class="sidebar-weight-name">C4 Accrued Interest</div><div class="sidebar-weight-value">0.15</div></div>
         </div>
     </div>
     """,
@@ -661,10 +661,10 @@ st.markdown(
             ringkas, jelas, dan siap dipresentasikan.
         </div>
         <div class="hero-badges">
-            <div class="hero-badge">Bobot C1 = 40%</div>
+            <div class="hero-badge">Bobot C1 = 35%</div>
             <div class="hero-badge">Bobot C2 = 30%</div>
             <div class="hero-badge">Bobot C3 = 20%</div>
-            <div class="hero-badge">Bobot C4 = 10%</div>
+            <div class="hero-badge">Bobot C4 = 15%</div>
         </div>
     </div>
     """,
@@ -965,7 +965,7 @@ elif menu == "Perhitungan SAW":
             "Kriteria": ["C1 Jumlah Realisasi", "C2 Outstanding", "C3 Kolektabilitas", "C4 Accrued Interest"],
             "Nilai Awal": [detail["jumlah_realisasi"], detail["outstanding"], detail["skor_kolektabilitas"], detail["accrued_interest"]],
             "Normalisasi": [detail["c1_normalisasi"], detail["c2_normalisasi"], detail["c3_normalisasi"], detail["c4_normalisasi"]],
-            "Bobot": [0.40, 0.30, 0.20, 0.10],
+            "Bobot": [0.35, 0.30, 0.20, 0.15],
         }
     )
     saw_detail["Nilai Terbobot"] = saw_detail["Normalisasi"] * saw_detail["Bobot"]
@@ -1025,7 +1025,7 @@ elif menu == "Detail Mitra":
             "Kriteria": ["C1 Jumlah Realisasi", "C2 Outstanding", "C3 Kolektabilitas", "C4 Accrued Interest"],
             "Nilai Awal": [detail["jumlah_realisasi"], detail["outstanding"], detail["skor_kolektabilitas"], detail["accrued_interest"]],
             "Normalisasi": [detail["c1_normalisasi"], detail["c2_normalisasi"], detail["c3_normalisasi"], detail["c4_normalisasi"]],
-            "Bobot": [0.40, 0.30, 0.20, 0.10],
+            "Bobot": [0.35, 0.30, 0.20, 0.15],
         }
     )
     detail_table["Nilai Terbobot"] = detail_table["Normalisasi"] * detail_table["Bobot"]
