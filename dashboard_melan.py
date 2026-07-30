@@ -5,7 +5,6 @@ import pymysql
 import streamlit as st
 from sqlalchemy import create_engine
 
-
 st.set_page_config(
     page_title="Dashboard SPK SAW UMKM",
     page_icon="📊",
@@ -405,20 +404,12 @@ def get_engine():
 
 @st.cache_data
 def load_data():
-    query = """
-        SELECT
-            id_import,
-            nama_debitur,
-            jumlah_realisasi,
-            outstanding,
-            kolektabilitas_bumn,
-            accrued_interest
-        FROM tb_import_melan
-    """
+    query = "SELECT * FROM tb_import_melan"
     engine = get_engine()
     with engine.connect() as connection:
         df = pd.read_sql_query(query, connection)
 
+    # Tambah kolom nama tampilan
     df["nama_mitra_tampil"] = df.apply(
         lambda row: f"Nama Mitra Tidak Diketahui (ID {int(row['id_import'])})"
         if pd.isna(row["nama_debitur"]) or str(row["nama_debitur"]).strip() == ""
@@ -437,10 +428,8 @@ def rupiah(value):
 def smart_rupiah(value):
     if pd.isna(value):
         return "Rp 0"
-
     nilai = float(value)
     nilai_abs = abs(nilai)
-
     if nilai_abs >= 1_000_000_000:
         return f"Rp {nilai / 1_000_000_000:.2f} M"
     if nilai_abs >= 1_000_000:
@@ -459,7 +448,6 @@ def angka(value):
 def konversi_kolektabilitas(value):
     if pd.isna(value):
         return 0
-
     teks = str(value).strip().lower()
     mapping = {
         "lancar": 5,
@@ -478,10 +466,20 @@ def konversi_kolektabilitas(value):
 
 
 def hitung_saw(df):
+    """Proses SAW, mengembalikan dataframe dengan kolom normalisasi dan nilai_saw."""
     df = df.copy()
 
+    # Pastikan numerik
     for col in ["jumlah_realisasi", "outstanding", "accrued_interest"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Simpan data asli yang belum difill untuk keperluan validasi
+    # (tidak perlu disimpan di sini, karena ringkasan diambil dari df_raw_asli)
+
+    # Isi NaN dengan 0 untuk proses SAW
+    df[["jumlah_realisasi", "outstanding", "accrued_interest"]] = df[
+        ["jumlah_realisasi", "outstanding", "accrued_interest"]
+    ].fillna(0)
 
     df["skor_kolektabilitas"] = df["kolektabilitas_bumn"].apply(konversi_kolektabilitas)
 
@@ -513,7 +511,7 @@ def hitung_saw(df):
         + (df["c4_normalisasi"] * bobot_c4)
     )
 
-    return df.sort_values("nilai_saw", ascending=False).reset_index(drop=True)
+    return df
 
 
 def style_currency_table(df, currency_cols=None, decimal_cols=None, highlight_cols=None):
@@ -524,37 +522,67 @@ def style_currency_table(df, currency_cols=None, decimal_cols=None, highlight_co
     styler = df.style
 
     if currency_cols:
-        styler = styler.format({col: rupiah for col in currency_cols if col in df.columns}, na_rep="-")
+        styler = styler.format(
+            {col: rupiah for col in currency_cols if col in df.columns}, na_rep="-"
+        )
     if decimal_cols:
-        styler = styler.format({col: "{:.4f}" for col in decimal_cols if col in df.columns}, na_rep="-")
+        styler = styler.format(
+            {col: "{:.4f}" for col in decimal_cols if col in df.columns}, na_rep="-"
+        )
 
     if highlight_cols:
-        styler = styler.set_table_styles([
-            {"selector": "th", "props": [("background-color", "#0f172a"), ("color", "#f8fafc"), ("border", "1px solid #243244")]},
-            {"selector": "td", "props": [("background-color", "#111827"), ("color", "#e5e7eb"), ("border", "1px solid #243244")]},
-            {"selector": "table", "props": [("border-collapse", "separate"), ("border-spacing", "0")]},
-        ])
+        styler = styler.set_table_styles(
+            [
+                {
+                    "selector": "th",
+                    "props": [
+                        ("background-color", "#0f172a"),
+                        ("color", "#f8fafc"),
+                        ("border", "1px solid #243244"),
+                    ],
+                },
+                {
+                    "selector": "td",
+                    "props": [
+                        ("background-color", "#111827"),
+                        ("color", "#e5e7eb"),
+                        ("border", "1px solid #243244"),
+                    ],
+                },
+                {
+                    "selector": "table",
+                    "props": [
+                        ("border-collapse", "separate"),
+                        ("border-spacing", "0"),
+                    ],
+                },
+            ]
+        )
 
         def color_scale(series):
             if not pd.api.types.is_numeric_dtype(series):
                 return ["" for _ in series]
-
             min_v = series.min()
             max_v = series.max()
             if pd.isna(min_v) or pd.isna(max_v) or max_v == min_v:
-                return ["background-color: #1f2937; color: #f8fafc; font-weight: 700;" for _ in series]
-
+                return [
+                    "background-color: #1f2937; color: #f8fafc; font-weight: 700;"
+                    for _ in series
+                ]
             styles = []
             for value in series:
                 if pd.isna(value):
                     styles.append("")
                     continue
-
                 ratio = max(0.0, min(1.0, (float(value) - min_v) / (max_v - min_v)))
                 start = (31, 41, 55)
                 end = (34, 197, 94)
-                rgb = tuple(int(start[i] + (end[i] - start[i]) * ratio) for i in range(3))
-                styles.append(f"background-color: rgb{rgb}; color: #f8fafc; font-weight: 700;")
+                rgb = tuple(
+                    int(start[i] + (end[i] - start[i]) * ratio) for i in range(3)
+                )
+                styles.append(
+                    f"background-color: rgb{rgb}; color: #f8fafc; font-weight: 700;"
+                )
             return styles
 
         for col in highlight_cols:
@@ -577,6 +605,7 @@ def render_metric(label, value, note="", accent="accent-primary"):
     )
 
 
+# ======================= DATA LOADING =======================
 try:
     df_raw = load_data()
 except Exception as exc:
@@ -588,52 +617,68 @@ if df_raw.empty:
     st.warning("Data pada tabel tb_import_melan masih kosong.")
     st.stop()
 
+# Salinan data asli untuk statistik ringkasan (sebelum fillna)
+df_raw_asli = df_raw.copy()
 
-ddf_ranked = hitung_saw(df_raw)
-
-df_ranked_valid = ddf_ranked[
-    ~ddf_ranked["nama_mitra_tampil"]
-    .astype(str)
-    .str.lower()
-    .str.contains("nama mitra tidak diketahui|none|nan|null", na=False)
+# Siapkan data untuk SAW
+saw_input = df_raw[
+    [
+        "id_import",
+        "nama_debitur",
+        "jumlah_realisasi",
+        "outstanding",
+        "kolektabilitas_bumn",
+        "accrued_interest",
+    ]
 ].copy()
 
-top_10 = df_ranked_valid.head(10).copy()
+ddf_ranked = hitung_saw(saw_input)
 
-bottom_10 = (
-    df_ranked_valid
-    .sort_values("nilai_saw", ascending=True)
-    .head(10)
-    .copy()
+# Gabungkan semua kolom asli dengan hasil SAW
+ddf_full = df_raw.merge(
+    ddf_ranked[
+        [
+            "id_import",
+            "c1_normalisasi",
+            "c2_normalisasi",
+            "c3_normalisasi",
+            "c4_normalisasi",
+            "skor_kolektabilitas",
+            "nilai_saw",
+        ]
+    ],
+    on="id_import",
+    how="left",
 )
 
-df_filtered = (
-    pd.concat([top_10, bottom_10], ignore_index=True)
-    .drop_duplicates(subset=["id_import"])
+# Tambahkan ranking SAW
+ddf_full["ranking_saw"] = (
+    ddf_full["nilai_saw"].rank(ascending=False, method="min").astype(int)
 )
 
-df_display = df_filtered.sort_values("nilai_saw", ascending=False).reset_index(drop=True)
-
-
+# ======================= SIDEBAR =======================
 st.sidebar.title("SPK SAW UMKM")
 st.sidebar.caption("Sistem Pendukung Keputusan berbasis SAW")
+
 st.sidebar.markdown(
-    """
+    f"""
     <div class="sidebar-card">
         <div class="sidebar-card-title">Status Data</div>
-        <div class="sidebar-card-value">20</div>
-        <div class="sidebar-card-copy">Data yang tampil hanya 20 mitra terpilih: 10 tertinggi dan 10 terendah.</div>
+        <div class="sidebar-card-value">{len(df_raw)}</div>
+        <div class="sidebar-card-copy">Total data di database (setelah cleaning).</div>
         <div class="sidebar-chip-row">
             <span class="sidebar-chip">SAW Ready</span>
             <span class="sidebar-chip">MySQL</span>
-            <span class="sidebar-chip">Top & Bottom</span>
+            <span class="sidebar-chip">Full Data</span>
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-menu = st.sidebar.radio("Menu", ["Dashboard", "Data Mitra", "Perhitungan SAW", "Detail Mitra"])
+menu = st.sidebar.radio(
+    "Menu", ["Dashboard", "Data Mitra", "Perhitungan SAW"]
+)
 
 st.sidebar.divider()
 st.sidebar.markdown(
@@ -651,6 +696,7 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
+# ======================= HERO =======================
 st.markdown(
     """
     <div class="hero">
@@ -671,377 +717,424 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ======================= MENU DASHBOARD =======================
 if menu == "Dashboard":
     st.markdown(
         """
         <div class="section-card">
-            <div class="section-label">Ringkasan</div>
-            <div class="section-heading">Ringkasan hasil SAW terpilih</div>
+            <div class="section-label">Ringkasan Data</div>
+            <div class="section-heading">Seluruh Dataset Hasil Cleaning</div>
             <div class="section-copy">
-                Dashboard ini hanya menampilkan 20 data hasil filter SAW agar pembacaan cepat, ringkas, dan fokus ke peringkat teratas serta terbawah.
+                Tabel lengkap di bawah ini menampilkan <b>semua kolom</b> dan <b>seluruh record</b> dari database.
+                Gunakan filter di atas untuk mempersempit tampilan.
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        render_metric("Jumlah Data Ditampilkan", angka(len(df_filtered)), "Gabungan top 10 dan bottom 10", "accent-primary")
-    with col2:
-        render_metric("Total Jumlah Realisasi", smart_rupiah(df_filtered["jumlah_realisasi"].sum()), "Akumulasi data yang tampil", "accent-secondary")
-    with col3:
-        render_metric("Total Outstanding", smart_rupiah(df_filtered["outstanding"].sum()), "Akumulasi data yang tampil", "accent-success")
-    with col4:
-        render_metric("Rata-rata Nilai SAW", f"{df_filtered['nilai_saw'].mean():.4f}", "Rata-rata 20 data terpilih", "accent-warning")
-    with col5:
-        render_metric("Nilai SAW Tertinggi", f"{df_filtered['nilai_saw'].max():.4f}", "Nilai tertinggi pada data yang difilter", "accent-danger")
+    # Metrik total dan count per kolom kriteria
+    kriteria_kolom = [
+        "jumlah_realisasi",
+        "outstanding",
+        "kolektabilitas_bumn",
+        "accrued_interest",
+    ]
+    cols_metric = st.columns(5)
+    with cols_metric[0]:
+        render_metric("Total Record", angka(len(df_raw)), "Seluruh data", "accent-primary")
+    for i, col in enumerate(kriteria_kolom, start=1):
+        cnt = int(df_raw[col].notna().sum())
+        label = col.replace("_", " ").title()
+        with cols_metric[i % 5]:
+            render_metric(f"Count {label}", angka(cnt), f"Non-null di {label}", "accent-secondary")
 
-    visual_tab, table_tab = st.tabs(["Visualisasi", "Tabel"])
+    st.divider()
 
-    with visual_tab:
-        left, right = st.columns(2)
-        with left:
-            st.subheader("Top 10 Nilai SAW")
-            fig_top = px.bar(
-                top_10,
-                x="nilai_saw",
-                y="nama_mitra_tampil",
-                orientation="h",
-                text="nilai_saw",
-                labels={"nilai_saw": "Nilai SAW", "nama_mitra_tampil": "Nama Mitra"},
-                custom_data=["jumlah_realisasi", "outstanding", "accrued_interest"],
+    # Filter
+    with st.expander("🔍 Filter Data (opsional)"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            search_nama = st.text_input("Nama Debitur mengandung", "")
+            kolek_unik = sorted(df_raw["kolektabilitas_bumn"].dropna().unique().tolist())
+            selected_kolek = st.multiselect(
+                "Kolektabilitas BUMN", options=kolek_unik, default=[]
             )
-            fig_top.update_traces(
-                marker_color=THEME["primary"],
-                texttemplate="%{text:.4f}",
-                textposition="outside",
-                cliponaxis=False,
-                hovertemplate=(
-                    "<b>%{y}</b><br>"
-                    "Nilai SAW: %{x:.4f}<br>"
-                    "Jumlah Realisasi: %{customdata[0]:,.0f}<br>"
-                    "Outstanding: %{customdata[1]:,.0f}<br>"
-                    "Accrued Interest: %{customdata[2]:,.0f}<extra></extra>"
-                ),
+        with col2:
+            min_jumlah = st.number_input(
+                "Jumlah Realisasi min",
+                value=0.0,
+                step=1000000.0,
+                format="%.0f",
             )
-            fig_top.update_layout(
-                template="plotly_dark",
-                yaxis=dict(categoryorder="total ascending"),
-                xaxis_title="Nilai SAW",
-                yaxis_title="Nama Mitra",
-                height=420,
-                margin=dict(l=10, r=10, t=20, b=10),
+            max_jumlah = st.number_input(
+                "Jumlah Realisasi max",
+                value=float(df_raw["jumlah_realisasi"].max()),
+                step=1000000.0,
+                format="%.0f",
             )
-            st.plotly_chart(fig_top, width="stretch")
-
-        with right:
-            st.subheader("Bottom 10 Nilai SAW")
-            fig_bottom = px.bar(
-                bottom_10,
-                x="nilai_saw",
-                y="nama_mitra_tampil",
-                orientation="h",
-                text="nilai_saw",
-                labels={"nilai_saw": "Nilai SAW", "nama_mitra_tampil": "Nama Mitra"},
-                custom_data=["jumlah_realisasi", "outstanding", "accrued_interest"],
+        with col3:
+            min_outstanding = st.number_input(
+                "Outstanding min", value=0.0, step=1000000.0, format="%.0f"
             )
-            fig_bottom.update_traces(
-                marker_color=THEME["secondary"],
-                texttemplate="%{text:.4f}",
-                textposition="outside",
-                cliponaxis=False,
-                hovertemplate=(
-                    "<b>%{y}</b><br>"
-                    "Nilai SAW: %{x:.4f}<br>"
-                    "Jumlah Realisasi: %{customdata[0]:,.0f}<br>"
-                    "Outstanding: %{customdata[1]:,.0f}<br>"
-                    "Accrued Interest: %{customdata[2]:,.0f}<extra></extra>"
-                ),
+            max_outstanding = st.number_input(
+                "Outstanding max",
+                value=float(df_raw["outstanding"].max()),
+                step=1000000.0,
+                format="%.0f",
             )
-            fig_bottom.update_layout(
-                template="plotly_dark",
-                yaxis=dict(categoryorder="total ascending"),
-                xaxis_title="Nilai SAW",
-                yaxis_title="Nama Mitra",
-                height=420,
-                margin=dict(l=10, r=10, t=20, b=10),
+            min_accrued = st.number_input(
+                "Accrued Interest min", value=0.0, step=1000000.0, format="%.0f"
             )
-            st.plotly_chart(fig_bottom, width="stretch")
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.subheader("Komposisi Kolektabilitas")
-            kol_data = df_filtered["kolektabilitas_bumn"].value_counts().reset_index()
-            kol_data.columns = ["kolektabilitas_bumn", "jumlah"]
-            fig_pie = px.pie(
-                kol_data,
-                names="kolektabilitas_bumn",
-                values="jumlah",
-                hole=0.45,
-                color_discrete_sequence=CHART_COLORS,
-            )
-            fig_pie.update_traces(
-                textinfo="percent+label",
-                hovertemplate="<b>%{label}</b><br>Jumlah data: %{value}<br>Porsi: %{percent}<extra></extra>",
-            )
-            fig_pie.update_layout(
-                template="plotly_dark",
-                legend_title_text="Kolektabilitas",
-                height=390,
-                margin=dict(l=10, r=10, t=20, b=10),
-            )
-            st.plotly_chart(fig_pie, width="stretch")
-
-        with col_b:
-            st.subheader("Scatter Plot Realisasi vs Outstanding")
-            fig_scatter = px.scatter(
-                df_filtered,
-                x="jumlah_realisasi",
-                y="outstanding",
-                color="kolektabilitas_bumn",
-                size="nilai_saw",
-                hover_name="nama_mitra_tampil",
-                labels={
-                    "jumlah_realisasi": "Jumlah Realisasi",
-                    "outstanding": "Outstanding",
-                    "kolektabilitas_bumn": "Kolektabilitas",
-                    "nilai_saw": "Nilai SAW",
-                },
-                custom_data=["accrued_interest", "nilai_saw"],
-                color_discrete_sequence=CHART_COLORS,
-            )
-            fig_scatter.update_traces(
-                hovertemplate=(
-                    "<b>%{hovertext}</b><br>"
-                    "Jumlah Realisasi: %{x:,.0f}<br>"
-                    "Outstanding: %{y:,.0f}<br>"
-                    "Accrued Interest: %{customdata[0]:,.0f}<br>"
-                    "Nilai SAW: %{customdata[1]:.4f}<extra></extra>"
-                )
-            )
-            fig_scatter.update_layout(
-                template="plotly_dark",
-                legend_title_text="Kolektabilitas",
-                xaxis_title="Jumlah Realisasi (Rp)",
-                yaxis_title="Outstanding (Rp)",
-                height=390,
-                margin=dict(l=10, r=10, t=20, b=10),
-            )
-            st.plotly_chart(fig_scatter, width="stretch")
-
-    with table_tab:
-        st.subheader("10 Data Tertinggi dan 10 Data Terendah")
-        st.caption("Tabel di bawah mempertahankan fokus hanya pada data terpilih supaya lebih mudah dibandingkan.")
-        top_table_col, bottom_table_col = st.columns(2)
-
-        top_table = top_10[["nama_mitra_tampil", "jumlah_realisasi", "outstanding", "kolektabilitas_bumn", "accrued_interest", "nilai_saw"]].copy()
-        top_table = top_table.rename(columns={
-            "nama_mitra_tampil": "Nama Mitra",
-            "jumlah_realisasi": "Jumlah Realisasi",
-            "outstanding": "Outstanding",
-            "kolektabilitas_bumn": "Kolektabilitas",
-            "accrued_interest": "Accrued Interest",
-            "nilai_saw": "Nilai SAW",
-        })
-
-        bottom_table = bottom_10[["nama_mitra_tampil", "jumlah_realisasi", "outstanding", "kolektabilitas_bumn", "accrued_interest", "nilai_saw"]].copy()
-        bottom_table = bottom_table.rename(columns={
-            "nama_mitra_tampil": "Nama Mitra",
-            "jumlah_realisasi": "Jumlah Realisasi",
-            "outstanding": "Outstanding",
-            "kolektabilitas_bumn": "Kolektabilitas",
-            "accrued_interest": "Accrued Interest",
-            "nilai_saw": "Nilai SAW",
-        })
-
-        with top_table_col:
-            st.markdown("#### Top 10")
-            st.dataframe(
-                style_currency_table(
-                    top_table,
-                    currency_cols=["Jumlah Realisasi", "Outstanding", "Accrued Interest"],
-                    decimal_cols=["Nilai SAW"],
-                    highlight_cols=["Nilai SAW"],
-                ),
-                width="stretch",
-                hide_index=True,
+            max_accrued = st.number_input(
+                "Accrued Interest max",
+                value=float(df_raw["accrued_interest"].max()),
+                step=1000000.0,
+                format="%.0f",
             )
 
-        with bottom_table_col:
-            st.markdown("#### Bottom 10")
-            st.dataframe(
-                style_currency_table(
-                    bottom_table,
-                    currency_cols=["Jumlah Realisasi", "Outstanding", "Accrued Interest"],
-                    decimal_cols=["Nilai SAW"],
-                    highlight_cols=["Nilai SAW"],
-                ),
-                width="stretch",
-                hide_index=True,
-            )
+    # Terapkan filter
+    df_filtered = df_raw.copy()
+    if search_nama:
+        df_filtered = df_filtered[
+            df_filtered["nama_debitur"]
+            .astype(str)
+            .str.contains(search_nama, case=False, na=False)
+        ]
+    if selected_kolek:
+        df_filtered = df_filtered[
+            df_filtered["kolektabilitas_bumn"].isin(selected_kolek)
+        ]
+    df_filtered = df_filtered[
+        (df_filtered["jumlah_realisasi"] >= min_jumlah)
+        & (df_filtered["jumlah_realisasi"] <= max_jumlah)
+    ]
+    df_filtered = df_filtered[
+        (df_filtered["outstanding"] >= min_outstanding)
+        & (df_filtered["outstanding"] <= max_outstanding)
+    ]
+    df_filtered = df_filtered[
+        (df_filtered["accrued_interest"] >= min_accrued)
+        & (df_filtered["accrued_interest"] <= max_accrued)
+    ]
 
+    st.markdown(
+        f'<div class="small-note">Menampilkan <b>{len(df_filtered)}</b> dari total <b>{len(df_raw)}</b> record.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Tampilkan tabel lengkap dengan format
+    currency_cols = [
+        "jumlah_realisasi",
+        "outstanding",
+        "accrued_interest",
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "nilai_akhir",
+    ]
+    # Hanya kolom yang ada di df
+    currency_cols = [c for c in currency_cols if c in df_filtered.columns]
+
+    st.dataframe(
+        style_currency_table(
+            df_filtered,
+            currency_cols=currency_cols,
+            decimal_cols=[],
+            highlight_cols=[],
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+    csv = df_filtered.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download CSV (Data Filtered)",
+        csv,
+        "dashboard_data_cleaned.csv",
+        "text/csv",
+        width="content",
+    )
+
+# ======================= MENU DATA MITRA =======================
 elif menu == "Data Mitra":
     st.markdown(
         """
         <div class="section-card">
             <div class="section-label">Data Mitra</div>
-            <div class="section-heading">Daftar 20 data hasil filter SAW</div>
+            <div class="section-heading">Visualisasi Seluruh Mitra Binaan</div>
             <div class="section-copy">
-                Tabel berikut menampilkan 20 data yang sudah difilter dari hasil SAW. Tidak ada ranking atau status prioritas di tampilan ini.
+                Grafik di bawah ini menggunakan <b>seluruh data</b> hasil perhitungan SAW,
+                tanpa memotong 10 atau 20 teratas.
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    display_data = df_display[[
-        "nama_mitra_tampil",
-        "jumlah_realisasi",
-        "outstanding",
-        "kolektabilitas_bumn",
-        "accrued_interest",
-        "nilai_saw",
-    ]].copy()
-
-    display_data = display_data.rename(columns={
-        "nama_mitra_tampil": "Nama Mitra",
-        "jumlah_realisasi": "Jumlah Realisasi",
-        "outstanding": "Outstanding",
-        "kolektabilitas_bumn": "Kolektabilitas",
-        "accrued_interest": "Accrued Interest",
-        "nilai_saw": "Nilai SAW",
-    })
-
     st.markdown(
-        f'<div class="small-note">Data yang ditampilkan: <b>{len(display_data)}</b> baris dari hasil filter SAW.</div>',
+        f'<div class="small-note">Total data: <b>{len(ddf_full)}</b> mitra.</div>',
         unsafe_allow_html=True,
     )
 
-    st.dataframe(
-        style_currency_table(
-            display_data,
-            currency_cols=["Jumlah Realisasi", "Outstanding", "Accrued Interest"],
-            decimal_cols=["Nilai SAW"],
-            highlight_cols=["Nilai SAW"],
+    # Bar chart seluruh data SAW (diurutkan descending)
+    st.subheader("Peringkat Nilai SAW Seluruh Mitra")
+    sorted_full = ddf_full.sort_values("nilai_saw", ascending=False)
+    # Tinggi chart proporsional, dibatasi agar tidak terlalu ekstrem
+    chart_height = max(600, min(len(sorted_full) * 20, 6000))
+    fig_bar = px.bar(
+        sorted_full,
+        x="nilai_saw",
+        y="nama_mitra_tampil",
+        orientation="h",
+        text="nilai_saw",
+        labels={"nilai_saw": "Nilai SAW", "nama_mitra_tampil": "Nama Mitra"},
+        custom_data=["jumlah_realisasi", "outstanding", "accrued_interest"],
+    )
+    fig_bar.update_traces(
+        marker_color=THEME["primary"],
+        texttemplate="%{text:.4f}",
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Nilai SAW: %{x:.4f}<br>"
+            "Jumlah Realisasi: %{customdata[0]:,.0f}<br>"
+            "Outstanding: %{customdata[1]:,.0f}<br>"
+            "Accrued Interest: %{customdata[2]:,.0f}<extra></extra>"
         ),
-        width="stretch",
-        hide_index=True,
+    )
+    fig_bar.update_layout(
+        template="plotly_dark",
+        yaxis=dict(categoryorder="total ascending"),
+        xaxis_title="Nilai SAW",
+        yaxis_title="Nama Mitra",
+        height=chart_height,
+        margin=dict(l=10, r=10, t=20, b=10),
+    )
+    st.plotly_chart(fig_bar, width="stretch")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.subheader("Komposisi Kolektabilitas (Seluruh Data)")
+        kol_data = (
+            ddf_full["kolektabilitas_bumn"].value_counts().reset_index()
+        )
+        kol_data.columns = ["kolektabilitas_bumn", "jumlah"]
+        fig_pie = px.pie(
+            kol_data,
+            names="kolektabilitas_bumn",
+            values="jumlah",
+            hole=0.45,
+            color_discrete_sequence=CHART_COLORS,
+        )
+        fig_pie.update_traces(
+            textinfo="percent+label",
+            hovertemplate="<b>%{label}</b><br>Jumlah: %{value}<br>Porsi: %{percent}<extra></extra>",
+        )
+        fig_pie.update_layout(
+            template="plotly_dark",
+            legend_title_text="Kolektabilitas",
+            height=390,
+            margin=dict(l=10, r=10, t=20, b=10),
+        )
+        st.plotly_chart(fig_pie, width="stretch")
+
+    with col_b:
+        st.subheader("Scatter Plot Realisasi vs Outstanding")
+        fig_scatter = px.scatter(
+            ddf_full,
+            x="jumlah_realisasi",
+            y="outstanding",
+            color="kolektabilitas_bumn",
+            size="nilai_saw",
+            hover_name="nama_mitra_tampil",
+            labels={
+                "jumlah_realisasi": "Jumlah Realisasi",
+                "outstanding": "Outstanding",
+                "kolektabilitas_bumn": "Kolektabilitas",
+                "nilai_saw": "Nilai SAW",
+            },
+            custom_data=["accrued_interest", "nilai_saw"],
+            color_discrete_sequence=CHART_COLORS,
+        )
+        fig_scatter.update_traces(
+            hovertemplate=(
+                "<b>%{hovertext}</b><br>"
+                "Jumlah Realisasi: %{x:,.0f}<br>"
+                "Outstanding: %{y:,.0f}<br>"
+                "Accrued Interest: %{customdata[0]:,.0f}<br>"
+                "Nilai SAW: %{customdata[1]:.4f}<extra></extra>"
+            )
+        )
+        fig_scatter.update_layout(
+            template="plotly_dark",
+            legend_title_text="Kolektabilitas",
+            xaxis_title="Jumlah Realisasi (Rp)",
+            yaxis_title="Outstanding (Rp)",
+            height=390,
+            margin=dict(l=10, r=10, t=20, b=10),
+        )
+        st.plotly_chart(fig_scatter, width="stretch")
+
+    # Download data mitra (seluruh)
+    csv_mitra = ddf_full.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download CSV Data Mitra (Lengkap)",
+        csv_mitra,
+        "data_mitra_saw_lengkap.csv",
+        "text/csv",
+        width="content",
     )
 
-    csv = display_data.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", csv, "data_mitra_saw.csv", "text/csv", width="content")
-
+# ======================= MENU PERHITUNGAN SAW =======================
 elif menu == "Perhitungan SAW":
     st.markdown(
         """
         <div class="section-card">
             <div class="section-label">Perhitungan SAW</div>
-            <div class="section-heading">Detail proses normalisasi dan bobot</div>
+            <div class="section-heading">Ringkasan Proses & Detail Lengkap</div>
             <div class="section-copy">
-                Pilih satu mitra untuk melihat nilai awal, hasil normalisasi, bobot, dan nilai terbobot setiap kriteria.
+                Menampilkan jumlah data yang berhasil dan tidak dapat dihitung, serta
+                tabel hasil lengkap dengan seluruh kolom asli dan kolom SAW.
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    selected_mitra = st.selectbox("Pilih Nama Mitra", options=df_display["nama_mitra_tampil"].dropna().unique())
-    detail = df_display[df_display["nama_mitra_tampil"] == selected_mitra].iloc[0]
+    # ---- RINGKASAN ----
+    kriteria = [
+        "jumlah_realisasi",
+        "outstanding",
+        "kolektabilitas_bumn",
+        "accrued_interest",
+    ]
+    total_data = len(df_raw_asli)
+    # Data dengan setidaknya satu kriteria NULL (sebelum fillna)
+    data_null_mask = df_raw_asli[kriteria].isnull().any(axis=1)
+    gagal_total = int(data_null_mask.sum())
+    berhasil_total = total_data - gagal_total
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        render_metric("Jumlah Realisasi", smart_rupiah(detail["jumlah_realisasi"]), "Nilai awal C1", "accent-primary")
-    with col2:
-        render_metric("Outstanding", smart_rupiah(detail["outstanding"]), "Nilai awal C2", "accent-secondary")
-    with col3:
-        render_metric("Kolektabilitas", str(detail["kolektabilitas_bumn"]), "Kategori C3", "accent-warning")
-    with col4:
-        render_metric("Accrued Interest", smart_rupiah(detail["accrued_interest"]), "Nilai awal C4", "accent-danger")
-
-    st.subheader(f"Proses SAW: {detail['nama_mitra_tampil']}")
-    saw_detail = pd.DataFrame(
-        {
-            "Kriteria": ["C1 Jumlah Realisasi", "C2 Outstanding", "C3 Kolektabilitas", "C4 Accrued Interest"],
-            "Nilai Awal": [detail["jumlah_realisasi"], detail["outstanding"], detail["skor_kolektabilitas"], detail["accrued_interest"]],
-            "Normalisasi": [detail["c1_normalisasi"], detail["c2_normalisasi"], detail["c3_normalisasi"], detail["c4_normalisasi"]],
-            "Bobot": [0.35, 0.30, 0.20, 0.15],
-        }
-    )
-    saw_detail["Nilai Terbobot"] = saw_detail["Normalisasi"] * saw_detail["Bobot"]
-
-    st.dataframe(
-        style_currency_table(
-            saw_detail,
-            currency_cols=["Nilai Awal"],
-            decimal_cols=["Normalisasi", "Bobot", "Nilai Terbobot"],
-            highlight_cols=["Nilai Terbobot"],
-        ),
-        width="stretch",
-        hide_index=True,
-    )
-
-    st.success(f"Nilai SAW = {detail['nilai_saw']:.4f}")
-    csv = saw_detail.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", csv, f"perhitungan_saw_{selected_mitra}.csv", "text/csv", width="content")
-
-elif menu == "Detail Mitra":
-    st.markdown(
-        """
-        <div class="section-card">
-            <div class="section-label">Detail Mitra</div>
-            <div class="section-heading">Ringkasan lengkap satu mitra</div>
-            <div class="section-copy">
-                Halaman ini menampilkan detail nilai awal, normalisasi, dan hasil akhir SAW untuk satu mitra yang dipilih.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    selected_mitra = st.selectbox("Pilih Nama Mitra", options=df_display["nama_mitra_tampil"].dropna().unique())
-    detail = df_display[df_display["nama_mitra_tampil"] == selected_mitra].iloc[0]
-
+    st.subheader("Ringkasan Proses")
     col1, col2, col3 = st.columns(3)
     with col1:
-        render_metric("Nilai SAW", f"{detail['nilai_saw']:.4f}", "Hasil akhir perhitungan", "accent-success")
+        render_metric("Total Data Masuk", angka(total_data), "Seluruh record", "accent-primary")
     with col2:
-        render_metric("Kolektabilitas", str(detail["kolektabilitas_bumn"]), "Kategori input data", "accent-warning")
+        render_metric(
+            "Data Berhasil Diproses",
+            angka(berhasil_total),
+            "Semua kriteria lengkap",
+            "accent-success",
+        )
     with col3:
-        render_metric("Skor Kolektabilitas", str(int(detail["skor_kolektabilitas"])), "Skor yang dipakai pada C3", "accent-secondary")
+        render_metric(
+            "Data Tidak Dapat Dihitung",
+            angka(gagal_total),
+            "Minimal satu kriteria NULL",
+            "accent-danger" if gagal_total > 0 else "accent-success",
+        )
 
-    st.divider()
-
-    raw_col1, raw_col2, raw_col3 = st.columns(3)
-    with raw_col1:
-        st.info(f"Jumlah Realisasi\n\n{smart_rupiah(detail['jumlah_realisasi'])}")
-    with raw_col2:
-        st.info(f"Outstanding\n\n{smart_rupiah(detail['outstanding'])}")
-    with raw_col3:
-        st.info(f"Accrued Interest\n\n{smart_rupiah(detail['accrued_interest'])}")
-
-    detail_table = pd.DataFrame(
-        {
-            "Kriteria": ["C1 Jumlah Realisasi", "C2 Outstanding", "C3 Kolektabilitas", "C4 Accrued Interest"],
-            "Nilai Awal": [detail["jumlah_realisasi"], detail["outstanding"], detail["skor_kolektabilitas"], detail["accrued_interest"]],
-            "Normalisasi": [detail["c1_normalisasi"], detail["c2_normalisasi"], detail["c3_normalisasi"], detail["c4_normalisasi"]],
-            "Bobot": [0.35, 0.30, 0.20, 0.15],
-        }
+    # Per kriteria
+    st.markdown("#### Rincian per Kriteria")
+    detail_ringkas = []
+    for c in kriteria:
+        ok = int(df_raw_asli[c].notna().sum())
+        nok = total_data - ok
+        detail_ringkas.append(
+            {
+                "Kriteria": c.replace("_", " ").title(),
+                "Data Berhasil": ok,
+                "Data Gagal": nok,
+                "Keterangan": "NULL" if nok > 0 else "Lengkap",
+            }
+        )
+    df_ringkas = pd.DataFrame(detail_ringkas)
+    st.dataframe(
+        df_ringkas,
+        use_container_width=True,
+        hide_index=True,
     )
-    detail_table["Nilai Terbobot"] = detail_table["Normalisasi"] * detail_table["Bobot"]
 
-    st.subheader("Tabel Normalisasi SAW")
+    # ---- DETAIL LENGKAP ----
+    st.divider()
+    st.subheader("Detail Perhitungan SAW (Seluruh Data)")
+    st.caption(
+        "Tabel di bawah memuat seluruh kolom asli ditambah kolom hasil SAW. "
+        "Gunakan fitur search, filter, dan sorting bawaan tabel."
+    )
+
+    # Urutkan kolom agar mudah dibaca
+    kolom_awal = [
+        "id_import",
+        "nama_debitur",
+        "cabang",
+        "jumlah_realisasi",
+        "outstanding",
+        "kolektabilitas_bumn",
+        "accrued_interest",
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "nilai_akhir",
+        "ranking",
+    ]
+    kolom_saw = [
+        "c1_normalisasi",
+        "c2_normalisasi",
+        "skor_kolektabilitas",
+        "c3_normalisasi",
+        "c4_normalisasi",
+        "nilai_saw",
+        "ranking_saw",
+    ]
+    # Hanya kolom yang ada di ddf_full
+    kolom_tampil = [c for c in kolom_awal if c in ddf_full.columns] + kolom_saw
+    # Pastikan nama_mitra_tampil juga ditampilkan setelah nama_debitur
+    if "nama_mitra_tampil" in ddf_full.columns and "nama_mitra_tampil" not in kolom_tampil:
+        idx = kolom_tampil.index("nama_debitur") + 1 if "nama_debitur" in kolom_tampil else len(kolom_tampil)
+        kolom_tampil.insert(idx, "nama_mitra_tampil")
+
+    df_tampil = ddf_full[kolom_tampil].copy()
+
+    # Format mata uang untuk kolom numerik terkait
+    currency_cols_detail = [
+        "jumlah_realisasi",
+        "outstanding",
+        "accrued_interest",
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "nilai_akhir",
+    ]
+    currency_cols_detail = [c for c in currency_cols_detail if c in df_tampil.columns]
+    decimal_cols_detail = [
+        "c1_normalisasi",
+        "c2_normalisasi",
+        "c3_normalisasi",
+        "c4_normalisasi",
+        "nilai_saw",
+    ]
+
     st.dataframe(
         style_currency_table(
-            detail_table,
-            currency_cols=["Nilai Awal"],
-            decimal_cols=["Normalisasi", "Bobot", "Nilai Terbobot"],
-            highlight_cols=["Nilai Terbobot"],
+            df_tampil,
+            currency_cols=currency_cols_detail,
+            decimal_cols=decimal_cols_detail,
+            highlight_cols=["nilai_saw"],
         ),
         width="stretch",
         hide_index=True,
     )
 
-    st.success(f"Nilai akhir SAW untuk {detail['nama_mitra_tampil']} adalah {detail['nilai_saw']:.4f}.")
-    csv = detail_table.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", csv, f"detail_mitra_{selected_mitra}.csv", "text/csv", width="content")
+    csv_saw = df_tampil.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download CSV Detail SAW (Lengkap)",
+        csv_saw,
+        "perhitungan_saw_detail.csv",
+        "text/csv",
+        width="content",
+    )
